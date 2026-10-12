@@ -85,14 +85,53 @@ if ($path === "/reset" && $method === "POST") {
     $email = strtolower(trim((string)($_POST["email"] ?? "")));
     $token = trim((string)($_POST["token"] ?? ""));
     $password = (string)($_POST["password"] ?? "");
+
     if (strlen($password) < 8) {
-        render("reset", ["title" => "Choose a new password", "email" => $email, "token" => $token, "error" => "Password needs at least eight characters."]);
+        render("reset", [
+            "title" => "Choose a new password",
+            "email" => $email,
+            "token" => $token,
+            "error" => "Password needs at least eight characters.",
+        ]);
+        exit;
     }
-    if (!consume_reset_token($email, $token)) {
-        render("reset", ["title" => "Choose a new password", "email" => $email, "token" => $token, "error" => "That reset token is not valid for this address today."]);
+
+    $pdo = db();
+    $pdo->beginTransaction();
+
+    try {
+        $valid = consume_reset_token($email, $token);
+
+        if ($valid && find_user_by_email($email)) {
+            set_user_password($email, $password);
+            $pdo->commit();
+        } else {
+            $pdo->rollBack();
+            $valid = false;
+        }
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
     }
-    set_user_password($email, $password);
-    render("login", ["title" => "Sign in", "email" => $email, "error" => "Password updated. Sign in."]);
+
+    if (!$valid) {
+        render("reset", [
+            "title" => "Choose a new password",
+            "email" => $email,
+            "token" => $token,
+            "error" => "That reset token is invalid, expired, or already used.",
+        ]);
+        exit;
+    }
+
+    render("login", [
+        "title" => "Sign in",
+        "email" => $email,
+        "error" => "Password updated. Sign in.",
+    ]);
+    exit;
 }
 
 if ($path === "/items/new" && $method === "GET") {
